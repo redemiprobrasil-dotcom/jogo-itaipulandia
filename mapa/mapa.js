@@ -1,6 +1,8 @@
 // Quarteirão Itaipulândia — mapa completo + teste FPS (three.js r160).
 // Quadra: x∈[0,Lx], z∈[0,Lz]. z=Lz Av. Tiradentes (+z), z=0 R. Sete de Setembro (−z), x=0 R. Castro Alves (−x), x=Lx R. Rui Barbosa (+x).
 import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
 import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
 import {createSoldado} from '../skin/soldado.js?v=7';
 const hud=document.getElementById('hud'),info=document.getElementById('info'),hitEl=document.getElementById('hit');
@@ -91,7 +93,33 @@ const M=o=>new THREE.MeshStandardMaterial(Object.assign({roughness:.95},o));
 const muroMat=M({color:0xd8d0c0}),gramaMat=M({color:0x5f8a3c}),asfMat=M({color:0x3d3f42}),calcMat=M({color:0x9a968e}),meioMat=M({color:0xc8c4bb});
 function caixa(w,h,d,mat,x,y,z,ry=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.rotation.y=ry;S.add(m);return m;}
 const layout=[];
-function muro(c,s,sobra,lado){const mid=s+sobra/2,x=c.P[0]+c.u[0]*mid,z=c.P[1]+c.u[1]*mid;const m=caixa(sobra,1.8,.2,muroMat,x,.9,z,c.rot);m.translateZ(-.1);layout.push({k:'(muro)',lado,s,w:sobra,d:0});}
+// ---------- casa 3D baixada (um carregamento, clones) ----------
+// lista em modelos/lista.json -> cada modelo é normalizado (escala p/ largura real, chão y=0, frente em z=0 virada p/ +z)
+const casaTpls=[];
+{const ld=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);let lista=[];
+ try{lista=(await (await fetch(B+'modelos/lista.json',{cache:'no-cache'})).json()).modelos;}catch(e){console.error('falhou lista.json',e);}
+ await Promise.all(lista.map(async(M0)=>{try{const gl=await ld.loadAsync(B+'modelos/'+M0.arquivo);const r=gl.scene;
+  const piv=new THREE.Group();piv.add(r);r.rotation.y=THREE.MathUtils.degToRad(M0.rotY||0);piv.updateMatrixWorld(true);
+  let b=new THREE.Box3().setFromObject(piv),sz=b.getSize(new THREE.Vector3());
+  if(sz.y>Math.max(sz.x,sz.z)*1.5&&sz.z<sz.x*.3){r.rotation.x=-Math.PI/2;piv.updateMatrixWorld(true);b.setFromObject(piv);b.getSize(sz);} // Z-up
+  const W=M0.altura?sz.x*M0.altura/sz.y:(M0.largura||11);piv.scale.setScalar(W/Math.max(sz.x,1e-6));piv.updateMatrixWorld(true);b.setFromObject(piv);
+  const c=b.getCenter(new THREE.Vector3());const t=new THREE.Group();t.add(piv);piv.position.set(-c.x,-b.min.y,-b.max.z);
+  b.getSize(sz);t.userData={w:W,d:sz.z,h:sz.y,nome:M0.arquivo};
+  t.traverse(o=>{if(o.isMesh)for(const m of [].concat(o.material))if(m)for(const n of ['map','normalMap','roughnessMap','emissiveMap','aoMap'])capTex(m[n]);});
+  casaTpls.push(t);console.log('casa',M0.arquivo,sz.x.toFixed(1),sz.y.toFixed(1),sz.z.toFixed(1));}catch(e){console.error('falhou modelo',M0.arquivo,e);}}));
+ casaTpls.sort((x,y)=>x.userData.nome<y.userData.nome?-1:1);}
+const casaTpl=casaTpls.length?1:null;
+let nCasas=0;
+// coloca o modelo T com frente no ponto (x,z), virado p/ ry (frente local +z), ocupando largura w
+function casa(x,z,ry,w,i,T){const g=T.clone();const v=1+((i*37)%11-5)/100;const e=w/T.userData.w;const ez=Math.min(1.05,22/T.userData.d);
+ g.scale.set(e*(i%2?-1:1),v,ez*v);g.rotation.y=ry;g.position.set(x,0,z);g.translateZ(-.4);S.add(g);nCasas++;}
+// preenche um trecho de comprimento L com modelos variados da lista (cada um na sua largura natural, esticada p/ fechar o trecho)
+function fileira(P0,u,L,ry,i0=0){if(!casaTpls.length||L<7)return false;const GP=1.2,seq=[];let s=0,i=i0;
+ const menor=casaTpls.reduce((a,t)=>t.userData.w<a.userData.w?t:a);
+ while(L-s>=7){const ok=casaTpls.filter(t=>t.userData.w<=(L-s)*1.15);if(!ok.length)break;const T=ok[(i*7+(i>>2))%ok.length];seq.push(T);s+=T.userData.w+GP;i++;}
+ if(!seq.length)seq.push(menor);const tot=seq.reduce((a,t)=>a+t.userData.w+GP,0),f=L/tot;let m=0;
+ seq.forEach((T,j)=>{const w=(T.userData.w+GP)*f;casa(P0[0]+u[0]*(m+w/2),P0[1]+u[1]*(m+w/2),ry,w-GP*f,i0+j,T);m+=w;});return true;}
+function muro(c,s,sobra,lado){if(fileira([c.P[0]+c.u[0]*s,c.P[1]+c.u[1]*s],c.u,sobra,c.rot,Math.round(s))){layout.push({k:'(casa3d)',lado,s,w:sobra,d:0});return;}const mid=s+sobra/2,x=c.P[0]+c.u[0]*mid,z=c.P[1]+c.u[1]*mid;const m=caixa(sobra,1.8,.2,muroMat,x,.9,z,c.rot);m.translateZ(-.1);layout.push({k:'(muro)',lado,s,w:sobra,d:0});}
 for(let[lado,lista]of Object.entries(LADOS)){const c=LADO_CFG[lado];let s=c.s0;
  const put=k=>{const g=built[k],d=dim[k];g.rotation.y=c.rot;g.position.set(c.P[0]+c.u[0]*(s-d.minx),0,c.P[1]+c.u[1]*(s-d.minx));S.add(g);layout.push({k,lado,s,w:d.w,d:d.d});s+=d.w+GAP;};
  if(lista[0]==='~'){const it=lista.slice(1),folga=Math.max(0,c.L-c.s0-soma(it))/(it.length-1);
@@ -100,6 +128,10 @@ for(let[lado,lista]of Object.entries(LADOS)){const c=LADO_CFG[lado];let s=c.s0;
  ini.forEach(put);const sFim=c.L-soma(fim)+GAP;if(sFim-s>.5)muro(c,s,sFim-s,lado);s=Math.max(s,sFim);fim.forEach(put);
  const sobra=c.L-s;if(sobra>.5)muro(c,s,sobra,lado);
 }
+// usuário: "pode alterar tudo por essas" -> todas as casas/lojas viram a casa 3D; terrenos vazios/gramado ficam
+const MANTER=new Set(['lote_vazio','lote_portao']);
+if(casaTpl)for(const L of layout){if(L.k[0]==='('||MANTER.has(L.k))continue;const c=LADO_CFG[L.lado];S.remove(built[L.k]);
+ fileira([c.P[0]+c.u[0]*L.s,c.P[1]+c.u[1]*L.s],c.u,L.w,c.rot,Math.round(L.s)+7);L.k='(casa3d:'+L.k+')';}
 // chão: asfalto, grama no miolo, calçadas e meio-fio
 const tot=new THREE.Mesh(new THREE.PlaneGeometry(Lx+120,zOp+120),asfMat);tot.rotation.x=-Math.PI/2;tot.position.set(Lx/2,-.03,zOp/2);S.add(tot);
 const gr=new THREE.Mesh(new THREE.PlaneGeometry(Lx,Lz),gramaMat);gr.rotation.x=-Math.PI/2;gr.position.set(Lx/2,-.02,Lz/2);S.add(gr);
@@ -112,6 +144,13 @@ mf(Lx+2*SW,.2,Lx/2,-SW);mf(Lx+2*SW,.2,Lx/2,Lz+SW);mf(.2,Lz+2*SW,-SW,Lz/2);mf(.2,
 const fx=M({color:0xe9d36a,emissive:0x222200});
 for(let x=-SW-ST;x<Lx+SW+ST;x+=6){caixa(3,.01,.15,fx,x+1.5,.0,Lz+SW+ST/2);caixa(3,.01,.15,fx,x+1.5,0,-SW-ST/2);}
 for(let z=-SW-ST;z<zOp;z+=6){caixa(.15,.01,3,fx,-SW-ST/2,0,z+1.5);caixa(.15,.01,3,fx,Lx+SW+ST/2,0,z+1.5);}
+// quarteirões vizinhos (do outro lado das 4 ruas), de frente p/ a quadra principal
+{const o=2*SW+ST;
+ calcada(-SW-o,Lz+o,Lx+SW+o,Lz+o+SW);calcada(-SW-o,-o-SW,Lx+SW+o,-o);calcada(-o-SW,-o,-o,Lz+o);calcada(Lx+o,-o,Lx+o+SW,Lz+o);
+ fileira([0,Lz+o+SW],[1,0],Lx,Math.PI,100);      // Av. Tiradentes (lado oposto)
+ fileira([Lx,-o-SW],[-1,0],Lx,0,200);            // R. Sete de Setembro
+ fileira([-o-SW,Lz],[0,-1],Lz,Math.PI/2,300);    // R. Castro Alves
+ fileira([Lx+o+SW,0],[0,1],Lz,-Math.PI/2,400);}  // R. Rui Barbosa
 // placas de rua
 function placa(txt,x,z,ry){const c=document.createElement('canvas');c.width=512;c.height=96;const g=c.getContext('2d');g.fillStyle='#1d4f9a';g.fillRect(0,0,512,96);g.fillStyle='#fff';g.font='bold 44px sans-serif';g.textAlign='center';g.fillText(txt,256,64);
  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;const p=new THREE.Mesh(new THREE.PlaneGeometry(2.4,.45),new THREE.MeshBasicMaterial({map:t,side:THREE.DoubleSide}));p.position.set(x,3,z);p.rotation.y=ry;S.add(p);caixa(.08,3,.08,M({color:0x555555}),x,1.5,z);}
@@ -224,13 +263,13 @@ function poeCamera(dt){const p=pl.p;
 }
 const nFalhas=Object.values(built).filter(g=>g.userData.falhou).length;
 console.log('LAYOUT',JSON.stringify({Lx,Lz,dK,dBar,dG,dCh,layout}));
-hud.textContent=`Quarteirão ${Lx}×${Lz} m · ${Object.keys(built).length} módulos${nFalhas?` · ${nFalhas} falharam`:''} · ${caixas.length} caixas de colisão`;
+hud.textContent=`Quarteirão ${Lx}×${Lz} m · ${Object.keys(built).length} módulos${nFalhas?` · ${nFalhas} falharam`:''} · ${caixas.length} caixas de colisão · ${nCasas} casas 3D`;
 player.visible=sd?true:!!MODO;if(sd)arma.visible=false;
 if(MODO==='topo'){info.style.display='none';document.getElementById('mira').style.display='none';hud.style.display='none';arma.visible=false;
- const c2=new THREE.OrthographicCamera(-1,1,1,-1,.1,500);const cx=Lx/2,cz=Lz/2,half=(Lz+2*SW+2*ST+6)/2;
+ const c2=new THREE.OrthographicCamera(-1,1,1,-1,.1,500);const cx=Lx/2,cz=Lz/2,half=(Lz+2*SW+2*ST+6)/2+16;
  const a=innerWidth/innerHeight;c2.left=-half*a;c2.right=half*a;c2.top=half;c2.bottom=-half;c2.updateProjectionMatrix();c2.position.set(cx,200,cz);c2.up.set(0,0,-1);c2.lookAt(cx,0,cz);
  S.fog=null;player.position.copy(spawn);
- for(const L of layout){if(L.k==='(muro)')continue;const b=new THREE.Box3().setFromObject(built[L.k]),c=b.getCenter(new THREE.Vector3());
+ for(const L of layout){if(L.k[0]==='(')continue;const b=new THREE.Box3().setFromObject(built[L.k]),c=b.getCenter(new THREE.Vector3());
   const cv=document.createElement('canvas');cv.width=512;cv.height=96;const g=cv.getContext('2d');g.font='bold 52px sans-serif';const tw=g.measureText(L.k).width+24;
   g.fillStyle='rgba(0,0,0,.65)';g.fillRect((512-tw)/2,10,tw,76);g.fillStyle='#fff';g.textAlign='center';g.fillText(L.k,256,66);
   const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,depthTest:false}));sp.scale.set(24,4.5,1);sp.position.set(c.x,60,c.z);sp.renderOrder=9;S.add(sp);}player.scale.setScalar(3);

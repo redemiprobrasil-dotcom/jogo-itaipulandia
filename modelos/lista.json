@@ -1,0 +1,15 @@
+{
+ "_como_usar": "Para adicionar casa: copie o .glb para esta pasta e acrescente aqui. Use 'altura' (m, mantém proporção real) OU 'largura' (m, padrão 11). rotY (graus) se a frente não estiver virada para a rua.",
+ "modelos": [
+  {
+   "arquivo": "casa_baixada1.glb",
+   "rotY": 0,
+   "largura": 11
+  },
+  {
+   "arquivo": "casa_baixada2.glb",
+   "rotY": 0,
+   "altura": 6.5
+  }
+ ]
+}
