@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Soldado</title><style>body{margin:0;overflow:hidden;font-family:sans-serif}#ui{position:fixed;top:10px;left:10px;z-index:2}button{margin:2px;padding:8px 12px}#inf{position:fixed;bottom:8px;left:10px;color:#333}</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script></head><body>
+<div id="ui"><button data-a="idle">Parado</button><button data-a="walk">Andar</button><button data-a="run">Correr</button><button data-a="shoot">Atirar</button><button data-a="jump">Pular</button> mira <input id="pt" type="range" min="-0.8" max="0.8" step="0.01" value="0"></div><div id="inf"></div>
+<script>addEventListener("error",e=>console.log("ERR "+e.message+" "+e.filename+":"+e.lineno));addEventListener("unhandledrejection",e=>console.log("REJ "+(e.reason&&e.reason.stack||e.reason)));</script><script type="module">
+import * as THREE from 'three';import {OrbitControls} from 'three/addons/controls/OrbitControls.js';import {createSoldado} from './soldado.js?v=7';
+const MODO=location.search.slice(1)||location.hash.slice(1);
+const R=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});R.setPixelRatio(1);R.setSize(innerWidth,innerHeight);R.outputColorSpace=THREE.SRGBColorSpace;R.toneMapping=THREE.ACESFilmicToneMapping;R.shadowMap.enabled=true;document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0xd9dadc);S.add(new THREE.HemisphereLight(0xffffff,0x8a8070,1.5));const sun=new THREE.DirectionalLight(0xffffff,1.6);sun.position.set(2,5,-4);sun.castShadow=true;S.add(sun);
+const ch=new THREE.Mesh(new THREE.PlaneGeometry(40,40),new THREE.MeshStandardMaterial({color:0xcfcfcf}));ch.rotation.x=-Math.PI/2;ch.receiveShadow=true;S.add(ch);
+const cam=new THREE.PerspectiveCamera(30,innerWidth/innerHeight,.05,100);cam.position.set(0,1.1,-6);
+const oc=new OrbitControls(cam,R.domElement);oc.target.set(0,.95,0);oc.update();
+const sd=await createSoldado('./');S.add(sd.object);sd.object.traverse(o=>{if(o.isMesh)o.castShadow=true;});
+window.sd=sd;document.getElementById('inf').textContent='vel. natural andar '+sd.velNatural.walk.toFixed(2)+' m/s, correr '+sd.velNatural.run.toFixed(2)+' m/s';
+for(const b of document.querySelectorAll('button'))b.onclick=()=>{const a=b.dataset.a;if(a==='walk')sd.setMove(1.5,0);else if(a==='run')sd.setMove(4.8,0);else if(a==='idle')sd.setMove(0);else sd.play(a);if(a==='jump'){vy=4.5;}};
+document.getElementById('pt').oninput=e=>sd.setAim(-+e.target.value);
+let vy=0;const relo=new THREE.Clock();
+function tick(dt){if(sd.estado.ar||vy>0){vy-=12*dt;sd.object.position.y+=vy*dt;if(sd.object.position.y<=0){sd.object.position.y=0;vy=0;sd.setGrounded(true);}}sd.update(dt);}
+if(MODO){document.getElementById('ui').style.display='none';
+ const vistas={frente:[0,1.0,-6],lado:[6,1.0,0],costas:[0,1.0,6]};
+ if(vistas[MODO]){sd.setMove(0);for(let i=0;i<40;i++)tick(1/30);cam.position.set(...vistas[MODO]);oc.update();R.render(S,cam);document.title='PRONTO';}
+ else if(MODO==='walk'||MODO==='run'||MODO==='shoot'){ // folha de contato
+  const W=1600,H=900,cols=4,rows=2;R.setSize(W,H);const out=document.createElement('canvas');out.width=W;out.height=H;const g=out.getContext('2d');
+  sd.setMove(MODO==='run'?4.8:1.5,0);for(let i=0;i<30;i++)tick(1/30);
+  cam.aspect=(W/cols)/(H/rows);cam.updateProjectionMatrix();cam.position.set(5.5,1.1,-1.5);oc.target.set(0,.95,0);oc.update();R.setSize(W/cols,H/rows);
+  const dur=1/sd.estado.w.walk;let n=0;
+  for(let i=0;i<cols*rows;i++){if(MODO==='shoot'&&i%3==0)sd.atirar();for(let k=0;k<4;k++)tick(1/60);R.render(S,cam);g.drawImage(R.domElement,(i%cols)*W/cols,Math.floor(i/cols)*H/rows);g.fillStyle='#000';g.font='16px sans-serif';g.fillText('t='+((i+1)*4/60).toFixed(2)+'s',(i%cols)*W/cols+8,Math.floor(i/cols)*H/rows+20);}
+  document.body.innerHTML='';document.body.appendChild(out);document.title='PRONTO';}
+}else (function loop(){requestAnimationFrame(loop);tick(Math.min(relo.getDelta(),.05));oc.update();R.render(S,cam);})();
+</script></body></html>

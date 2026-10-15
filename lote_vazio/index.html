@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Lote vazio</title><style>body{margin:0;overflow:hidden}canvas{position:fixed;inset:0;width:100vw!important;height:100vh!important}</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script></head><body>
+<script type="module">
+import * as THREE from 'three';import {OrbitControls} from 'three/addons/controls/OrbitControls.js';import {buildLoteVazio} from './lote_vazio.js';
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});r.setSize(innerWidth,innerHeight);r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.toneMapping=THREE.ACESFilmicToneMapping;r.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(r.domElement);
+const s=new THREE.Scene();s.background=new THREE.Color(0x9cc3ea);
+s.add(new THREE.HemisphereLight(0xf2f6fb,0x8a8070,1.6));const sun=new THREE.DirectionalLight(0xffffff,1.1);sun.position.set(-10,16,10);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-25,right:25,top:25,bottom:-25});s.add(sun);
+s.add(await buildLoteVazio());const rua=new THREE.Mesh(new THREE.PlaneGeometry(60,30),new THREE.MeshStandardMaterial({color:0x8c8a86,roughness:1}));rua.rotation.x=-Math.PI/2;rua.position.set(0,-.02,18);s.add(rua);
+const c=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,300);const ang=location.hash==='#angulo',esq=location.hash==='#esquina';
+c.position.set(...(esq?[17,2.5,6]:ang?[-12,6,12]:[0,2.2,12]));const o=new OrbitControls(c,r.domElement);o.target.set(...(esq?[9,3.2,-10]:[0,ang?1.5:2.5,-10]));o.update();
+(function a(){requestAnimationFrame(a);o.update();r.render(s,c);})();
+</script></body></html>

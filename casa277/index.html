@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Casa 277</title><style>body{margin:0;overflow:hidden}canvas{position:fixed;inset:0;width:100vw!important;height:100vh!important}</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script></head><body>
+<script type="module">
+import * as THREE from 'three';import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {buildCasa277,buildVizinho} from './casa277.js';
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});r.setSize(innerWidth,innerHeight);r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
+r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=1.0;r.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(r.domElement);
+const s=new THREE.Scene();s.background=new THREE.Color(0xe4e6e8);s.fog=new THREE.Fog(0xe4e6e8,40,120);
+s.add(new THREE.HemisphereLight(0xf2f4f8,0x8a8070,1.6));const sun=new THREE.DirectionalLight(0xffffff,1.0);sun.position.set(-6,14,12);sun.castShadow=true;sun.shadow.radius=6;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-15,right:15,top:15,bottom:-15});s.add(sun);
+s.add(await buildCasa277());const v=buildVizinho();v.position.set(12.5,0,-1);s.add(v);const v2=buildVizinho();v2.position.set(-11.6,0,-2);s.add(v2);
+const c=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,300);
+if(location.hash==='#angulo'){c.position.set(-9,4,10);}else c.position.set(0.5,1.7,8);
+const o=new OrbitControls(c,r.domElement);o.target.set(location.hash==='#angulo'?0:0.5,location.hash==='#angulo'?2.5:3.0,-2);o.update();
+(function a(){requestAnimationFrame(a);o.update();r.render(s,c);})();
+</script></body></html>
