@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><title>Itaipulândia – teste FPS</title>
+<style>body{margin:0;overflow:hidden;font-family:sans-serif}canvas{display:block}
+#mira{position:fixed;left:50%;top:50%;width:14px;height:14px;margin:-7px;pointer-events:none}
+#mira:before,#mira:after{content:'';position:absolute;background:#fff;box-shadow:0 0 2px #000}
+#mira:before{left:6px;top:0;width:2px;height:14px}#mira:after{top:6px;left:0;height:2px;width:14px}
+#hit{position:fixed;left:50%;top:50%;width:26px;height:26px;margin:-13px;border:2px solid #f33;transform:rotate(45deg);opacity:0;pointer-events:none;transition:opacity .25s}
+#info{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;text-align:center;cursor:pointer;font-size:18px}
+#hud{position:fixed;left:10px;bottom:10px;color:#fff;text-shadow:0 0 3px #000;font-size:13px}</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script></head><body>
+<div id="mira"></div><div id="hit"></div><div id="hud">carregando…</div>
+<div id="info"><div><b>Quarteirão Itaipulândia – teste</b><br><br>Clique para jogar<br>WASD andar · Shift correr · Espaço pular · Mouse mirar · Clique atirar · V 1ª/3ª pessoa · Esc sair</div></div>
+<script>addEventListener("error",e=>console.log("ERR "+e.message+" "+e.filename+":"+e.lineno));addEventListener("unhandledrejection",e=>console.log("REJ "+(e.reason&&e.reason.stack||e.reason)));</script><script type="module" src="./mapa.js?v=16"></script></body></html>

@@ -1,6 +1,8 @@
 // Quarteirão Itaipulândia — mapa completo + teste FPS (three.js r160).
-// Quadra: x∈[0,Lx], z∈[0,Lz]. z=Lz Av. Tiradentes (+z), z=0 R. Sete de Setembro (−z), x=0 R. Castro Alves (−x), x=Lx R. Rui Barbosa (+x).
+// Cenário: modelos/mapa_novo.glb (mapa baixado pelo usuário). Quarteirão antigo em mapa/backup_quarteirao/ e /mapa_antigo/ no site.
+// Antigo: x∈[0,Lx], z∈[0,Lz]. z=Lz Av. Tiradentes (+z), z=0 R. Sete de Setembro (−z), x=0 R. Castro Alves (−x), x=Lx R. Rui Barbosa (+x).
 import * as THREE from 'three';
+import {computeBoundsTree,acceleratedRaycast} from 'three-mesh-bvh';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
 import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
@@ -15,162 +17,79 @@ R.shadowMap.enabled=false; // leve p/ RTX 3050
 document.body.appendChild(R.domElement);
 const S=new THREE.Scene();S.background=new THREE.Color(0x9cc3ea);S.fog=new THREE.Fog(0x9cc3ea,MOBILE?35:90,MOBILE?110:260);
 S.add(new THREE.HemisphereLight(0xf2f6fb,0x8a8070,1.6));const sun=new THREE.DirectionalLight(0xffffff,1.2);sun.position.set(-40,80,60);S.add(sun);
-const cam=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,MOBILE?130:400);
+const cam=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,700);
 addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();R.setSize(innerWidth,innerHeight);});
 
-// ---------- módulos ----------
-const B='../';
-const MOD={
- kibarato:['kibarato/kibarato.js','buildKibarato',[B+'kibarato/fachada_kibarato.jpg']],
- pauli:['pauli/pauli.js','buildPauli',[B+'pauli/']],
- rokeli:['rokeli/rokeli.js','buildRokeli',[B+'rokeli/']],
- predio_cinza:['predio_cinza/predio_cinza.js','buildPredioCinza',[B+'predio_cinza/']],
- bar_esquina:['bar_esquina/bar_esquina.js','buildBarEsquina',[B+'bar_esquina/']],
- esquina_tijolo:['esquina_tijolo/esquina_tijolo.js','buildEsquinaTijolo',[B+'esquina_tijolo/']],
- lote_vazio:['lote_vazio/lote_vazio.js','buildLoteVazio',[]],
- lp_cross:['lp_cross/lp_cross.js','buildLpCross',[B+'lp_cross/fachada_lp_cross.jpg']],
- lote_portao:['lote_portao/lote_portao.js','buildLotePortao',[B+'lote_portao/fachada_lote_portao.jpg']],
- bazzar:['bazzar/bazzar.js','buildBazzar',[B+'bazzar/']],
- casa_vermelha:['casa_vermelha/casa_vermelha.js','buildCasaVermelha',[B+'casa_vermelha/']],
- mil_gaucho:['mil_gaucho/milGaucho.js','buildMilGaucho',[B+'mil_gaucho/fachada_mil_gaucho.jpg']],
- vizinha_jank:['vizinha_jank/vizinhaJank.js','buildVizinhaJank',[B+'vizinha_jank/fachada_vizinha.jpg']],
- jank:['jank/jank.js','buildJank',[B+'jank/fachada_jank.jpg']],
- toke_final:['toke_final/toke_final.js','buildTokeFinal',[B+'toke_final/fachada_toke.jpg']],
- icell:['icell/icell.js','buildIcell',[B+'icell/fachada_icell.jpg']],
- sobrado:['sobrado/sobrado.js','buildSobrado',[B+'sobrado/fachada_sobrado.jpg']],
- garagem:['garagem/garagem.js','buildGaragem',[B+'garagem/fachada_garagem.jpg']],
- portao_branco:['portao_branco/portaoBranco.js','buildPortaoBranco',[B+'portao_branco/fachada_portao_branco.jpg']],
- mecanica:['mecanica/mecanica.js','buildMecanica',[B+'mecanica/fachada_mecanica.jpg']],
- lenz:['lenz/lenz.js','buildLenz',[B+'lenz/fachada_lenz.jpg']],
- sky:['sky/sky.js','buildSky',[B+'sky/fachada_sky.jpg']],
- choperia:['choperia/choperia.js','buildChoperia',[B+'choperia/fachada_choperia.jpg',B+'choperia/lateral_choperia.jpg']],
-};
-// Ordem reconstruída da conversa + vizinhos visíveis em cada foto (ver relatório). Cada lista vai da esquerda p/ a direita
-// de quem olha a fachada da rua; prédio de esquina tem a lateral no +x local (direita) -> nenhum módulo precisa ser espelhado.
-// '|' = o que vem depois encosta no fim do lado (esquina) e a sobra vira muro; '~' = sobra dividida igualmente entre os lotes.
-const LADOS={
- tiradentes:['~','bar_esquina','predio_cinza','rokeli','pauli','kibarato'],       // Castro → Rui: gramado na esquina da Castro, Kibarato na esquina da Rui (lateral na Rui)
- rui:['|','sobrado','jank','vizinha_jank','mil_gaucho'],                          // Tiradentes → Sete: lateral do Kibarato, (trecho sem foto), 277, Jank, vizinha, Mil e Uma+Gaúcho (lateral na Sete)
- sete:['garagem','portao_branco','mecanica','lenz','sky','choperia'],              // Rui → Castro: lateral do Gaúcho, ..., choperia na esquina (lateral na Castro)
- castro:['icell','toke_final','lote_vazio','lp_cross','lote_portao','esquina_tijolo','bazzar','casa_vermelha'], // Sete → Tiradentes: lateral da choperia ... casa vermelha, gramado do bar
-};
-const ESPELHAR=[];
-const ST=10,SW=3.5,GAP=.3;
-
-hud.textContent='carregando módulos…';
-const built={};
-await Promise.all(Object.entries(MOD).map(async([k,[f,fn,args]])=>{
- try{const m=await import(B+f);built[k]=await m[fn](...args);}
- catch(e){console.error('falhou',k,e);const g=new THREE.Group();const b=new THREE.Mesh(new THREE.BoxGeometry(8,4,10),new THREE.MeshStandardMaterial({color:0xff00ff}));b.position.set(0,2,-5);g.add(b);built[k]=g;built[k].userData.falhou=true;}
-}));
-// limita texturas: >2048 sempre, >1024 no celular
-const TMAX=MOBILE?1024:2048,texVistas=new Set();
-function capTex(t){if(!t||texVistas.has(t)||!t.image)return;texVistas.add(t);const im=t.image,w=im.width,h=im.height;if(!w||Math.max(w,h)<=TMAX)return;
- const k=TMAX/Math.max(w,h),c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);t.image=c;t.needsUpdate=true;}
-for(const k in built)built[k].traverse(o=>{if(!o.isMesh)return;for(const m of [].concat(o.material))if(m)for(const n of ['map','normalMap','roughnessMap','emissiveMap','aoMap'])capTex(m[n]);});
-const dim={};
-function espelhar(g){g.scale.x=-1;g.traverse(o=>{if(!o.isMesh||!o.geometry.attributes.uv)return;o.geometry=o.geometry.clone();const uv=o.geometry.attributes.uv;let a=1e9,b=-1e9;
- for(let i=0;i<uv.count;i++){a=Math.min(a,uv.getX(i));b=Math.max(b,uv.getX(i));}for(let i=0;i<uv.count;i++)uv.setX(i,a+b-uv.getX(i));uv.needsUpdate=true;});}
-for(const k of ESPELHAR)if(built[k])espelhar(built[k]);
-// remove o piso de rua 40x20 que o casa277 traz (o mapa tem a própria rua)
-//built.casa277?.traverse(o=>{if(o.isMesh&&o.geometry.type==='PlaneGeometry'&&o.geometry.parameters.width===40)o.visible=false;});
-//built.casa277?.children.filter(o=>!o.visible).forEach(o=>o.parent.remove(o));
-function caixaVertical(g){g.updateMatrixWorld(true);const b=new THREE.Box3(),t=new THREE.Box3();g.traverse(o=>{if(!o.isMesh)return;t.setFromObject(o);if(t.max.y-t.min.y>.3)b.union(t);});return b;}
-for(const k in built){const g=built[k];let b=caixaVertical(g);if(b.isEmpty()||b.max.x-b.min.x<3)b=new THREE.Box3().setFromObject(g);
- dim[k]={minx:b.min.x,w:THREE.MathUtils.clamp(b.max.x-b.min.x,3,40),d:THREE.MathUtils.clamp(-b.min.z,3,30)};}
-const soma=l=>l.filter(k=>k!=='|'&&k!=='~').reduce((a,k)=>a+dim[k].w+GAP,0),maxD=l=>Math.max(...l.filter(k=>k!=='|').map(k=>dim[k].d));
-const dK=dim.kibarato.d,dBar=dim.bar_esquina.d,dG=dim.mil_gaucho.d,dCh=dim.choperia.d;
-const Lx=Math.ceil(Math.max(soma(LADOS.tiradentes),dG+soma(LADOS.sete)));
-const Lz=Math.ceil(Math.max(dK+soma(LADOS.rui),dCh+soma(LADOS.castro)+dBar));
-const zOp=Lz+2*SW+ST;
-const LADO_CFG={
- tiradentes:{P:[0,Lz],u:[1,0],rot:0,s0:0,L:Lx},
- rui:{P:[Lx,Lz],u:[0,-1],rot:Math.PI/2,s0:dK,L:Lz},
- sete:{P:[Lx,0],u:[-1,0],rot:Math.PI,s0:dG,L:Lx},
- castro:{P:[0,0],u:[0,1],rot:-Math.PI/2,s0:dCh,L:Lz-dBar},
-};
-const M=o=>new THREE.MeshStandardMaterial(Object.assign({roughness:.95},o));
-const muroMat=M({color:0xd8d0c0}),gramaMat=M({color:0x5f8a3c}),asfMat=M({color:0x3d3f42}),calcMat=M({color:0x9a968e}),meioMat=M({color:0xc8c4bb});
-function caixa(w,h,d,mat,x,y,z,ry=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.rotation.y=ry;S.add(m);return m;}
-const layout=[];
-// ---------- casa 3D baixada (um carregamento, clones) ----------
-// lista em modelos/lista.json -> cada modelo é normalizado (escala p/ largura real, chão y=0, frente em z=0 virada p/ +z)
+// ---------- cenário (glb) + colisão por raycast com BVH ----------
+THREE.BufferGeometry.prototype.computeBoundsTree=computeBoundsTree;THREE.Mesh.prototype.raycast=acceleratedRaycast;
+const B='../';const ESC=2.5; // mapa original ~70x45 un, árvores ~4,6 un -> x2,5 dá escala coerente c/ soldado de 1,8 m
+const ld=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+hud.textContent='carregando mapa…';
+const [mapa,mapa2]=await Promise.all([ld.loadAsync(B+'modelos/mapa_novo.glb'),ld.loadAsync(B+'modelos/mapa_novo2.glb')]).then(r=>r.map(x=>x.scene));
+mapa.scale.setScalar(ESC);S.add(mapa);mapa.updateMatrixWorld(true);
+// mapa 2 (serra com estrada de terra, já em metros): o pé da estrada (−106,132,−55 no original) encosta na borda leste do mapa 1 (x=50) em y=0
+const OFF2=new THREE.Vector3(181,-132.2,39);mapa2.position.copy(OFF2);S.add(mapa2);mapa2.updateMatrixWorld(true);
+const chaoMs=[],paredeMs=[],ocupMs=[];
+function filtraTri(o,fora){const g=o.geometry,P=g.attributes.position,I=g.index;if(!I)return;const v=new THREE.Vector3(),keep=[];
+ for(let i=0;i<I.count;i+=3){let n=0;for(let k=0;k<3;k++){v.fromBufferAttribute(P,I.getX(i+k)).applyMatrix4(o.matrixWorld);if(fora(v))n++;}if(n<3)keep.push(I.getX(i),I.getX(i+1),I.getX(i+2));}
+ if(keep.length<I.count)g.setIndex(keep);}
+mapa.traverse(o=>{if(!o.isMesh)return;const n=o.name;
+ if(n.startsWith('Sphere')||n.startsWith('Plane002')||n.startsWith('Plane003')){o.visible=false;return;} // céu em domo (não cobre o mapa 2) e protótipos flutuando
+ filtraTri(o,v=>v.y>30*ESC); // protótipos de árvore flutuando
+ for(const m of [].concat(o.material))if(m)m.side=THREE.DoubleSide;o.geometry.computeBoundsTree();
+ if(/^Plane_Material001|^Plane00[679]/.test(n))chaoMs.push(o);
+ if(/^Plane00[14579]|^Plane2522/.test(n)){paredeMs.push(o);ocupMs.push(o);}
+});
+const B1=new THREE.Box3();mapa.traverse(o=>{if(o.isMesh&&o.name.startsWith('Plane_Material001'))B1.expandByObject(o);});
+mapa2.traverse(o=>{if(!o.isMesh)return;const n=o.name;
+ filtraTri(o,v=>v.x<B1.max.x-1&&v.z>B1.min.z-2&&v.z<B1.max.z+2); // o que fica por baixo do mapa 1 sai (sem sobreposição)
+ for(const m of [].concat(o.material))if(m)m.side=THREE.DoubleSide;o.geometry.computeBoundsTree();
+ if(/Terrain|Aerial_Grass|Grass_Close|Dirt_Road|Road_Edge|Cobblestone|Ground_Dirt|Mud_Pile|Puddle|Rock_Decal|Sloped_Rock|Tall_Cliff|Broken_Rocks/.test(n))chaoMs.push(o);
+ if(/Trunk|Tall_Cliff|Sloped_Rock|Broken_Rocks|Fence|Wood_Log/.test(n))paredeMs.push(o);
+ if(/Trunk|Atlas001|Forest_Bush|Fence|Wood_Log|Tall_Cliff|Broken_Rocks|Dirt_Road|Road_Edge|Cobblestone/.test(n))ocupMs.push(o); // não pôr casa em cima
+});
+// faixa de ligação (estrada de terra) entre a borda do mapa 1 e o pé da estrada do mapa 2
+{const lig=new THREE.Mesh(new THREE.PlaneGeometry(34,46),new THREE.MeshStandardMaterial({color:0x6f6250,roughness:1}));lig.rotation.x=-Math.PI/2;lig.position.set(B1.max.x+15,.04,-16);S.add(lig);lig.updateMatrixWorld(true);lig.geometry.computeBoundsTree();chaoMs.push(lig);}
+const rc=new THREE.Raycaster();rc.firstHitOnly=true;const _d=new THREE.Vector3(0,-1,0),_v=new THREE.Vector3();
+function altura(x,z,de=200,lista=chaoMs){rc.set(_v.set(x,de,z),_d);rc.far=de+50;const h=rc.intersectObjects(lista,false)[0];return h?h.point.y:null;}
+// ---------- casas baixadas: pontos aleatórios (seed fixa), longe umas das outras ----------
+let rs=20261015;const rnd=()=>((rs=Math.imul(rs^rs>>>15,1|rs)+0x6D2B79F5|0,rs^=rs+Math.imul(rs^rs>>>7,61|rs),((rs^rs>>>14)>>>0)/4294967296));
 const casaTpls=[];
-{const ld=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);let lista=[];
- try{lista=(await (await fetch(B+'modelos/lista.json',{cache:'no-cache'})).json()).modelos;}catch(e){console.error('falhou lista.json',e);}
- await Promise.all(lista.map(async(M0)=>{try{const gl=await ld.loadAsync(B+'modelos/'+M0.arquivo);const r=gl.scene;
+{let lista=[];try{lista=(await (await fetch(B+'modelos/lista.json',{cache:'no-cache'})).json()).modelos;}catch(e){console.error('falhou lista.json',e);}
+ await Promise.all(lista.map(async(M0)=>{try{const r=(await ld.loadAsync(B+'modelos/'+M0.arquivo)).scene;
   const piv=new THREE.Group();piv.add(r);r.rotation.y=THREE.MathUtils.degToRad(M0.rotY||0);piv.updateMatrixWorld(true);
   let b=new THREE.Box3().setFromObject(piv),sz=b.getSize(new THREE.Vector3());
-  if(sz.y>Math.max(sz.x,sz.z)*1.5&&sz.z<sz.x*.3){r.rotation.x=-Math.PI/2;piv.updateMatrixWorld(true);b.setFromObject(piv);b.getSize(sz);} // Z-up
   const W=M0.altura?sz.x*M0.altura/sz.y:(M0.largura||11);piv.scale.setScalar(W/Math.max(sz.x,1e-6));piv.updateMatrixWorld(true);b.setFromObject(piv);
-  const c=b.getCenter(new THREE.Vector3());const t=new THREE.Group();t.add(piv);piv.position.set(-c.x,-b.min.y,-b.max.z);
-  b.getSize(sz);t.userData={w:W,d:sz.z,h:sz.y,nome:M0.arquivo};
-  t.traverse(o=>{if(o.isMesh)for(const m of [].concat(o.material))if(m)for(const n of ['map','normalMap','roughnessMap','emissiveMap','aoMap'])capTex(m[n]);});
-  casaTpls.push(t);console.log('casa',M0.arquivo,sz.x.toFixed(1),sz.y.toFixed(1),sz.z.toFixed(1));}catch(e){console.error('falhou modelo',M0.arquivo,e);}}));
+  const c=b.getCenter(new THREE.Vector3());const t=new THREE.Group();t.add(piv);piv.position.set(-c.x,-b.min.y,-c.z);b.getSize(sz);t.userData={w:sz.x,d:sz.z,nome:M0.arquivo};
+  t.traverse(o=>{if(o.isMesh){o.geometry.computeBoundsTree();}});casaTpls.push(t);}catch(e){console.error('falhou modelo',M0.arquivo,e);}}));
  casaTpls.sort((x,y)=>x.userData.nome<y.userData.nome?-1:1);}
-const casaTpl=casaTpls.length?1:null;
-let nCasas=0;
-// coloca o modelo T com frente no ponto (x,z), virado p/ ry (frente local +z), ocupando largura w
-function casa(x,z,ry,w,i,T){const g=T.clone();const v=1+((i*37)%11-5)/100;const e=w/T.userData.w;const ez=Math.min(1.05,22/T.userData.d);
- g.scale.set(e*(i%2?-1:1),v,ez*v);g.rotation.y=ry;g.position.set(x,0,z);g.translateZ(-.4);S.add(g);nCasas++;}
-// preenche um trecho de comprimento L com modelos variados da lista (cada um na sua largura natural, esticada p/ fechar o trecho)
-function fileira(P0,u,L,ry,i0=0){if(!casaTpls.length||L<7)return false;const GP=1.2,seq=[];let s=0,i=i0;
- const menor=casaTpls.reduce((a,t)=>t.userData.w<a.userData.w?t:a);
- while(L-s>=7){const ok=casaTpls.filter(t=>t.userData.w<=(L-s)*1.15);if(!ok.length)break;const T=ok[(i*7+(i>>2))%ok.length];seq.push(T);s+=T.userData.w+GP;i++;}
- if(!seq.length)seq.push(menor);const tot=seq.reduce((a,t)=>a+t.userData.w+GP,0),f=L/tot;let m=0;
- seq.forEach((T,j)=>{const w=(T.userData.w+GP)*f;casa(P0[0]+u[0]*(m+w/2),P0[1]+u[1]*(m+w/2),ry,w-GP*f,i0+j,T);m+=w;});return true;}
-function muro(c,s,sobra,lado){if(fileira([c.P[0]+c.u[0]*s,c.P[1]+c.u[1]*s],c.u,sobra,c.rot,Math.round(s))){layout.push({k:'(casa3d)',lado,s,w:sobra,d:0});return;}const mid=s+sobra/2,x=c.P[0]+c.u[0]*mid,z=c.P[1]+c.u[1]*mid;const m=caixa(sobra,1.8,.2,muroMat,x,.9,z,c.rot);m.translateZ(-.1);layout.push({k:'(muro)',lado,s,w:sobra,d:0});}
-for(let[lado,lista]of Object.entries(LADOS)){const c=LADO_CFG[lado];let s=c.s0;
- const put=k=>{const g=built[k],d=dim[k];g.rotation.y=c.rot;g.position.set(c.P[0]+c.u[0]*(s-d.minx),0,c.P[1]+c.u[1]*(s-d.minx));S.add(g);layout.push({k,lado,s,w:d.w,d:d.d});s+=d.w+GAP;};
- if(lista[0]==='~'){const it=lista.slice(1),folga=Math.max(0,c.L-c.s0-soma(it))/(it.length-1);
-  it.forEach((k,i)=>{if(i&&folga>.5){muro(c,s-GAP,folga+GAP,lado);s+=folga;}put(k);});continue;}
- const iB=lista.indexOf('|'),ini=iB<0?lista:lista.slice(0,iB),fim=iB<0?[]:lista.slice(iB+1);
- ini.forEach(put);const sFim=c.L-soma(fim)+GAP;if(sFim-s>.5)muro(c,s,sFim-s,lado);s=Math.max(s,sFim);fim.forEach(put);
- const sobra=c.L-s;if(sobra>.5)muro(c,s,sobra,lado);
+const chaoB=B1.clone();const AREA=new THREE.Box3(new THREE.Vector3(B1.min.x,-50,-121),new THREE.Vector3(301,100,199));
+const spawn=new THREE.Vector3();
+{let melhor=-1;for(let i=0;i<400;i++){const x=THREE.MathUtils.lerp(chaoB.min.x+8,chaoB.max.x-8,rnd()),z=THREE.MathUtils.lerp(chaoB.min.z+8,chaoB.max.z-8,rnd());
+  const h=altura(x,z);if(h===null||h>3)continue;const t=altura(x,z,200,ocupMs);if(t!==null&&t>h+.3)continue; // não em cima de árvore
+  const d=Math.hypot(x-(chaoB.min.x+chaoB.max.x)/2,z-(chaoB.min.z+chaoB.max.z)/2);if(melhor<0||d<melhor){melhor=d;spawn.set(x,h,z);}}}
+const casas=[],DMIN=Math.max(40,Math.min(60,Math.min(AREA.max.x-AREA.min.x,AREA.max.z-AREA.min.z)*.35));
+for(let tent=0;tent<6000&&casaTpls.length;tent++){const T=casaTpls[(casas.length+(tent>>8))%casaTpls.length],R0=Math.max(T.userData.w,T.userData.d)/2;
+ const x=THREE.MathUtils.lerp(AREA.min.x+R0+2,AREA.max.x-R0-2,rnd()),z=THREE.MathUtils.lerp(AREA.min.z+R0+2,AREA.max.z-R0-2,rnd()),ry=rnd()*Math.PI*2;
+ if(Math.hypot(x-spawn.x,z-spawn.z)<R0+12)continue;if(casas.some(c=>Math.hypot(c.x-x,c.z-z)<DMIN))continue;
+ // plano e livre: amostra 9 pontos do retângulo girado
+ let hs=[],ok=true;for(const a of [-.5,0,.5])for(const bq of [-.5,0,.5]){const lx=a*T.userData.w,lz=bq*T.userData.d,px=x+lx*Math.cos(ry)+lz*Math.sin(ry),pz=z-lx*Math.sin(ry)+lz*Math.cos(ry);
+  const h=altura(px,pz);if(h===null){ok=false;break;}const t=altura(px,pz,200,ocupMs);if(t!==null&&t>h-.3){ok=false;break;}hs.push(h);}
+ if(!ok||Math.max(...hs)-Math.min(...hs)>2.5)continue;
+ const g=T.clone();g.position.set(x,Math.min(...hs)-.05,z);g.rotation.y=ry;S.add(g);casas.push({x,z,g,nome:T.userData.nome});
+ // tenta trocar o modelo na próxima vez se este não couber
 }
-// usuário: "pode alterar tudo por essas" -> todas as casas/lojas viram a casa 3D; terrenos vazios/gramado ficam
-const MANTER=new Set(['lote_vazio','lote_portao']);
-if(casaTpl)for(const L of layout){if(L.k[0]==='('||MANTER.has(L.k))continue;const c=LADO_CFG[L.lado];S.remove(built[L.k]);
- fileira([c.P[0]+c.u[0]*L.s,c.P[1]+c.u[1]*L.s],c.u,L.w,c.rot,Math.round(L.s)+7);L.k='(casa3d:'+L.k+')';}
-// chão: asfalto, grama no miolo, calçadas e meio-fio
-const tot=new THREE.Mesh(new THREE.PlaneGeometry(Lx+120,zOp+120),asfMat);tot.rotation.x=-Math.PI/2;tot.position.set(Lx/2,-.03,zOp/2);S.add(tot);
-const gr=new THREE.Mesh(new THREE.PlaneGeometry(Lx,Lz),gramaMat);gr.rotation.x=-Math.PI/2;gr.position.set(Lx/2,-.02,Lz/2);S.add(gr);
-function calcada(x0,z0,x1,z1){const p=new THREE.Mesh(new THREE.PlaneGeometry(x1-x0,z1-z0),calcMat);p.rotation.x=-Math.PI/2;p.position.set((x0+x1)/2,-.015,(z0+z1)/2);S.add(p);}
-calcada(-SW,-SW,Lx+SW,0);calcada(-SW,Lz,Lx+SW,Lz+SW);calcada(-SW,0,0,Lz);calcada(Lx,0,Lx+SW,Lz);
-// meio-fio (anel em volta da quadra + lado oposto)
-const mf=(w,d,x,z)=>caixa(w,.15,d,meioMat,x,.075,z);
-mf(Lx+2*SW,.2,Lx/2,-SW);mf(Lx+2*SW,.2,Lx/2,Lz+SW);mf(.2,Lz+2*SW,-SW,Lz/2);mf(.2,Lz+2*SW,Lx+SW,Lz/2);
-// faixas centrais
-const fx=M({color:0xe9d36a,emissive:0x222200});
-for(let x=-SW-ST;x<Lx+SW+ST;x+=6){caixa(3,.01,.15,fx,x+1.5,.0,Lz+SW+ST/2);caixa(3,.01,.15,fx,x+1.5,0,-SW-ST/2);}
-for(let z=-SW-ST;z<zOp;z+=6){caixa(.15,.01,3,fx,-SW-ST/2,0,z+1.5);caixa(.15,.01,3,fx,Lx+SW+ST/2,0,z+1.5);}
-// quarteirões vizinhos (do outro lado das 4 ruas), de frente p/ a quadra principal
-{const o=2*SW+ST;
- calcada(-SW-o,Lz+o,Lx+SW+o,Lz+o+SW);calcada(-SW-o,-o-SW,Lx+SW+o,-o);calcada(-o-SW,-o,-o,Lz+o);calcada(Lx+o,-o,Lx+o+SW,Lz+o);
- fileira([0,Lz+o+SW],[1,0],Lx,Math.PI,100);      // Av. Tiradentes (lado oposto)
- fileira([Lx,-o-SW],[-1,0],Lx,0,200);            // R. Sete de Setembro
- fileira([-o-SW,Lz],[0,-1],Lz,Math.PI/2,300);    // R. Castro Alves
- fileira([Lx+o+SW,0],[0,1],Lz,-Math.PI/2,400);}  // R. Rui Barbosa
-// placas de rua
-function placa(txt,x,z,ry){const c=document.createElement('canvas');c.width=512;c.height=96;const g=c.getContext('2d');g.fillStyle='#1d4f9a';g.fillRect(0,0,512,96);g.fillStyle='#fff';g.font='bold 44px sans-serif';g.textAlign='center';g.fillText(txt,256,64);
- const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;const p=new THREE.Mesh(new THREE.PlaneGeometry(2.4,.45),new THREE.MeshBasicMaterial({map:t,side:THREE.DoubleSide}));p.position.set(x,3,z);p.rotation.y=ry;S.add(p);caixa(.08,3,.08,M({color:0x555555}),x,1.5,z);}
-placa('Av. Tiradentes',Lx+SW-.3,Lz+SW-.3,0);placa('R. Rui Barbosa',Lx+SW-.3,Lz+SW-.6,Math.PI/2);
-placa('R. Sete de Setembro',-SW+.3,-SW+.3,0);placa('R. Castro Alves',-SW+.3,-SW+.6,Math.PI/2);
-
-// ---------- colisão (caixas por malha, grade espacial) ----------
-S.updateMatrixWorld(true);const caixas=[],grade=new Map(),CEL=4,key=(i,j)=>i+','+j;
-S.traverse(o=>{if(!o.isMesh||o===tot||o===gr)return;if(o.material&&o.material.transparent&&o.material.opacity<.3)return;
- const b=new THREE.Box3().setFromObject(o);const sx=b.max.x-b.min.x,sy=b.max.y-b.min.y,sz=b.max.z-b.min.z;
- if(sy<.05&&b.max.y<.2)return; if(sx>80||sz>80)return; caixas.push(b);
- for(let i=Math.floor(b.min.x/CEL);i<=Math.floor(b.max.x/CEL);i++)for(let j=Math.floor(b.min.z/CEL);j<=Math.floor(b.max.z/CEL);j++){const kk=key(i,j);if(!grade.has(kk))grade.set(kk,[]);grade.get(kk).push(b);}});
-function perto(x,z){const r=[],i=Math.floor(x/CEL),j=Math.floor(z/CEL),vis=new Set();for(let a=i-1;a<=i+1;a++)for(let b=j-1;b<=j+1;b++)for(const c of grade.get(key(a,b))||[])if(!vis.has(c)){vis.add(c);r.push(c);}return r;}
+for(const c of casas){c.g.updateMatrixWorld(true);c.g.traverse(o=>{if(o.isMesh){chaoMs.push(o);paredeMs.push(o);}});}
+console.log('CASAS',casas.length,'DMIN',DMIN.toFixed(0),JSON.stringify(casas.map(c=>[c.nome,+c.x.toFixed(1),+c.z.toFixed(1)])));
+const M=o=>new THREE.MeshStandardMaterial(Object.assign({roughness:.95},o));
+function caixa(w,h,d,mat,x,y,z,ry=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.rotation.y=ry;S.add(m);return m;}
+// ---------- colisão ----------
 const RAIO=.35,ALT=1.7,PASSO=.45;
-function chao(x,z,pes){let h=0;for(const b of perto(x,z))if(x>b.min.x-RAIO*.5&&x<b.max.x+RAIO*.5&&z>b.min.z-RAIO*.5&&z<b.max.z+RAIO*.5&&b.max.y<=pes+PASSO&&b.max.y>h&&(b.max.y-b.min.y)<1.2)h=b.max.y;return h;}
-function bate(x,z,pes){for(const b of perto(x,z)){if(b.max.y<=pes+PASSO||b.min.y>=pes+ALT)continue;
- if(x>b.min.x-RAIO&&x<b.max.x+RAIO&&z>b.min.z-RAIO&&z<b.max.z+RAIO)return true;}return false;}
-
+function chao(x,z,pes){const h=altura(x,z,pes+PASSO+.05);return h===null?-1e9:h;}
+const DIRS=[...Array(8)].map((_,i)=>new THREE.Vector3(Math.cos(i*Math.PI/4),0,Math.sin(i*Math.PI/4)));
+function bate(x,z,pes){const h=altura(x,z,pes+PASSO+.05);if(h===null)return true; // fora do mapa ou degrau alto demais
+ for(const y of [pes+.6,pes+1.4])for(const d of DIRS){rc.set(_v.set(x,y,z),d);rc.far=RAIO;if(rc.intersectObjects(paredeMs,false).length)return true;}return false;}
 // ---------- jogador ----------
-const spawn=new THREE.Vector3(Lx/2,0,Lz+SW+ST/2); // meio da Av. Tiradentes
 const pl={p:spawn.clone(),vy:0,noChao:true};
 const player=new THREE.Group();S.add(player);
 let sd=null;try{sd=await createSoldado('../skin/');player.add(sd.object);sd.setFirstPerson(true);}catch(e){console.log('ERR soldado '+e);const corpo=new THREE.Mesh(new THREE.CapsuleGeometry(RAIO,ALT-2*RAIO,4,12),M({color:0x2f6fd0}));corpo.position.y=ALT/2;player.add(corpo);}
@@ -261,24 +180,17 @@ function poeCamera(dt){const p=pl.p;
   camAlvo.copy(piv).addScaledVector(_b,-dist);cam.position.lerp(camAlvo,1-Math.exp(-dt/.05));}
  else{sd.olho(_o);cam.position.x=_o.x;cam.position.z=_o.z;cam.position.y+=(_o.y-cam.position.y)*(1-Math.exp(-dt/.06));}
 }
-const nFalhas=Object.values(built).filter(g=>g.userData.falhou).length;
-console.log('LAYOUT',JSON.stringify({Lx,Lz,dK,dBar,dG,dCh,layout}));
-hud.textContent=`Quarteirão ${Lx}×${Lz} m · ${Object.keys(built).length} módulos${nFalhas?` · ${nFalhas} falharam`:''} · ${caixas.length} caixas de colisão · ${nCasas} casas 3D`;
+hud.textContent=`Mapa novo · ${casas.length} casas 3D`;
 player.visible=sd?true:!!MODO;if(sd)arma.visible=false;
 if(MODO==='topo'){info.style.display='none';document.getElementById('mira').style.display='none';hud.style.display='none';arma.visible=false;
- const c2=new THREE.OrthographicCamera(-1,1,1,-1,.1,500);const cx=Lx/2,cz=Lz/2,half=(Lz+2*SW+2*ST+6)/2+16;
- const a=innerWidth/innerHeight;c2.left=-half*a;c2.right=half*a;c2.top=half;c2.bottom=-half;c2.updateProjectionMatrix();c2.position.set(cx,200,cz);c2.up.set(0,0,-1);c2.lookAt(cx,0,cz);
- S.fog=null;player.position.copy(spawn);
- for(const L of layout){if(L.k[0]==='(')continue;const b=new THREE.Box3().setFromObject(built[L.k]),c=b.getCenter(new THREE.Vector3());
-  const cv=document.createElement('canvas');cv.width=512;cv.height=96;const g=cv.getContext('2d');g.font='bold 52px sans-serif';const tw=g.measureText(L.k).width+24;
-  g.fillStyle='rgba(0,0,0,.65)';g.fillRect((512-tw)/2,10,tw,76);g.fillStyle='#fff';g.textAlign='center';g.fillText(L.k,256,66);
-  const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,depthTest:false}));sp.scale.set(24,4.5,1);sp.position.set(c.x,60,c.z);sp.renderOrder=9;S.add(sp);}player.scale.setScalar(3);
+ const c2=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,1,2000);const cx=(AREA.min.x+AREA.max.x)/2,cz=(AREA.min.z+AREA.max.z)/2;
+ c2.position.set(cx,420,cz+160);c2.lookAt(cx,0,cz-10);S.fog=null;S.traverse(o=>{if(o.isMesh&&o.name.startsWith('Sphere'))o.visible=false;});player.scale.setScalar(4);
  let n=0;(function f(){R.render(S,c2);if(++n<30)requestAnimationFrame(f);else document.title='PRONTO';})();}
 else if(MODO==='rua'){info.style.display='none';
- const p=new THREE.Vector3(LADO_CFG.tiradentes.P[0]+4,0,Lz+SW+3);cam.position.set(p.x,1.6,p.z);cam.lookAt(p.x+18,2.5,Lz-2);atirar();
+ const p=spawn;cam.position.set(p.x,p.y+1.6,p.z);const c0=casas[0]||{x:p.x,z:p.z-10};cam.lookAt(c0.x,p.y+3,c0.z);atirar();
  let n=0;(function f(){R.render(S,cam);if(++n<30)requestAnimationFrame(f);else document.title='PRONTO';})();}
 else if(MODO==='3p'||MODO==='1p'){info.style.display='none';terceira=MODO==='3p';sd.setFirstPerson(!terceira);
- pl.p.set(LADO_CFG.tiradentes.P[0]+14,0,Lz+SW+4.5);cam.rotation.set(-.05,-Math.PI/2+.5,0);tecla.KeyW=true;
+ pl.p.copy(spawn);cam.rotation.set(-.05,-Math.PI/2+.5,0);tecla.KeyW=true;
  for(let i=0;i<50;i++){passo(1/30);poeCamera(1/30);}tecla.KeyW=false;if(terceira)sd.atirar();for(let i=0;i<3;i++){passo(1/60);poeCamera(1/60);}
  let n=0;(function f(){R.render(S,cam);if(++n<20)requestAnimationFrame(f);else document.title='PRONTO';})();}
 else{(function loop(){requestAnimationFrame(loop);const dt=Math.min(relogio.getDelta(),.05);if(ctl.isLocked||jogando){if(MV.fogo){tFogo-=dt;if(tFogo<=0){atirar();tFogo=.11;}}passo(dt);}poeCamera(dt);R.render(S,cam);})();}
